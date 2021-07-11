@@ -1,0 +1,240 @@
+kind: Workflow
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  name: network-block-chaos-workflow
+  namespace: litmus
+  creationTimestamp: null
+  labels:
+    cluster_id: aef0041c-aacb-4c92-a177-1ae8fad63aff
+    subject: network-block-chaos-workflow-litmus
+    workflow_id: de868af4-0d53-4a78-b4ff-fde183d8f9f0
+    workflows.argoproj.io/controller-instanceid: aef0041c-aacb-4c92-a177-1ae8fad63aff
+spec:
+  templates:
+    - name: custom-chaos
+      arguments: {}
+      inputs: {}
+      outputs: {}
+      metadata: {}
+      steps:
+        - - name: install-chaos-experiments
+            template: install-chaos-experiments
+            arguments: {}
+        - - name: pod-network-loss
+            template: pod-network-loss
+            arguments: {}
+        - - name: revert-chaos
+            template: revert-chaos
+            arguments: {}
+    - name: install-chaos-experiments
+      arguments: {}
+      inputs:
+        artifacts:
+          - name: pod-network-loss
+            path: /tmp/pod-network-loss.yaml
+            raw:
+              data: >
+                apiVersion: litmuschaos.io/v1alpha1
+
+                description:
+                  message: |
+                    Injects network packet loss on pods belonging to an app deployment
+                kind: ChaosExperiment
+
+                metadata:
+                  name: pod-network-loss
+                  labels:
+                    name: pod-network-loss
+                    app.kubernetes.io/part-of: litmus
+                    app.kubernetes.io/component: chaosexperiment
+                    app.kubernetes.io/version: 1.13.6
+                spec:
+                  definition:
+                    scope: Namespaced
+                    permissions:
+                      - apiGroups:
+                          - ""
+                          - batch
+                          - apps
+                          - apps.openshift.io
+                          - argoproj.io
+                          - litmuschaos.io
+                        resources:
+                          - jobs
+                          - pods
+                          - pods/log
+                          - replicationcontrollers
+                          - deployments
+                          - statefulsets
+                          - daemonsets
+                          - replicasets
+                          - deploymentconfigs
+                          - rollouts
+                          - pods/exec
+                          - events
+                          - chaosengines
+                          - chaosexperiments
+                          - chaosresults
+                        verbs:
+                          - get
+                          - list
+                          - patch
+                          - create
+                          - update
+                          - delete
+                          - deletecollection
+                    image: docker-dev.bin.pega.io/litmuschaos/go-runner:1.13.6
+                    imagePullPolicy: Always
+                    args:
+                      - -c
+                      - ./experiments -name pod-network-loss
+                    command:
+                      - /bin/bash
+                    env:
+                      - name: TARGET_CONTAINER
+                        value: ""
+                      - name: LIB_IMAGE
+                        value: docker-dev.bin.pega.io/litmuschaos/go-runner:1.13.6
+                      - name: NETWORK_INTERFACE
+                        value: eth0
+                      - name: TC_IMAGE
+                        value: gaiadocker/iproute2
+                      - name: NETWORK_PACKET_LOSS_PERCENTAGE
+                        value: "100"
+                      - name: TOTAL_CHAOS_DURATION
+                        value: "60"
+                      - name: RAMP_TIME
+                        value: ""
+                      - name: LIB
+                        value: litmus
+                      - name: PODS_AFFECTED_PERC
+                        value: ""
+                      - name: TARGET_PODS
+                        value: ""
+                      - name: CONTAINER_RUNTIME
+                        value: docker
+                      - name: DESTINATION_IPS
+                        value: ""
+                      - name: DESTINATION_HOSTS
+                        value: ""
+                      - name: SOCKET_PATH
+                        value: /var/run/docker.sock
+                      - name: SEQUENCE
+                        value: parallel
+                    labels:
+                      name: pod-network-loss
+                      app.kubernetes.io/part-of: litmus
+                      app.kubernetes.io/component: experiment-job
+                      app.kubernetes.io/version: 1.13.6
+      outputs: {}
+      metadata: {}
+      container:
+        name: ""
+        image: docker-dev.bin.pega.io/litmuschaos/k8s:latest
+        command:
+          - sh
+          - -c
+        args:
+          - kubectl apply -f /tmp/pod-network-loss.yaml -n
+            {{workflow.parameters.adminModeNamespace}} |  sleep 30
+        resources: {}
+    - name: pod-network-loss
+      arguments: {}
+      inputs:
+        artifacts:
+          - name: pod-network-loss
+            path: /tmp/chaosengine-pod-network-loss.yaml
+            raw:
+              data: >
+                apiVersion: litmuschaos.io/v1alpha1
+
+                kind: ChaosEngine
+
+                metadata:
+                  namespace: "{{workflow.parameters.adminModeNamespace}}"
+                  generateName: pod-network-loss
+                  labels:
+                    instance_id: aa1f6c1d-db41-4e77-8b7b-4057571f5a93
+                    context: litmus_pod_network_loss
+                    workflow_name: network-block-chaos-workflow
+                spec:
+                  jobCleanUpPolicy: retain
+                  engineState: active
+                  appinfo:
+                    appns: blitzar
+                    applabel: app.kubernetes.io/name=queue-service
+                    appkind: deployment
+                  chaosServiceAccount: litmus-admin
+                  experiments:
+                    - name: pod-network-loss
+                      spec:
+                        components:
+                          env:
+                            - name: NETWORK_INTERFACE
+                              value: eth0
+                            - name: NETWORK_PACKET_LOSS_PERCENTAGE
+                              value: "100"
+                            - name: TOTAL_CHAOS_DURATION
+                              value: "60"
+                            - name: CONTAINER_RUNTIME
+                              value: docker
+                            - name: SOCKET_PATH
+                              value: /var/run/docker.sock
+                        probe:
+                          - name: list-queue-details
+                            type: httpProbe
+                            mode: Edge
+                            runProperties:
+                              probeTimeout: 5
+                              retry: 2
+                              interval: 5
+                            httpProbe/inputs:
+                              url: https://rupaa-491-f9mu9gvw-frontend-us-east-1.search.integration.pegaservice.net/qs/blitzar/v1/a684ac20-416c-4127-9386-846eb7dd0673/queues/testQueue01
+                              insecureSkipVerify: true
+                              responseTimeout: 1000
+                              method:
+                                get:
+                                  criteria: ==
+                                  responseCode: "200"
+                  annotationCheck: "false"
+      outputs: {}
+      metadata:
+        labels:
+          weight: "10"
+      container:
+        name: ""
+        image: docker-dev.bin.pega.io/litmuschaos/litmus-checker:latest
+        args:
+          - -file=/tmp/chaosengine-pod-network-loss.yaml
+          - -saveName=/tmp/engine-name
+        resources: {}
+    - name: revert-chaos
+      arguments: {}
+      inputs: {}
+      outputs: {}
+      metadata: {}
+      container:
+        name: ""
+        image: docker-dev.bin.pega.io/litmuschaos/k8s:latest
+        command:
+          - sh
+          - -c
+        args:
+          - "kubectl delete chaosengine -l 'instance_id in
+            (aa1f6c1d-db41-4e77-8b7b-4057571f5a93, )' -n
+            {{workflow.parameters.adminModeNamespace}} "
+        resources: {}
+  entrypoint: custom-chaos
+  arguments:
+    parameters:
+      - name: adminModeNamespace
+        value: litmus
+  serviceAccountName: argo-chaos
+  podGC:
+    strategy: OnWorkflowCompletion
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+status:
+  ? startedAt
+  ? finishedAt
